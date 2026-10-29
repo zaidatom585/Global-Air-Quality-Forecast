@@ -101,29 +101,33 @@ class Fetcher:
         self.sleep = sleep
         self.requests_made = 0
 
-    def get(self, url: str, params: dict | None = None, weight: float = 1.0) -> requests.Response:
+    def get(self, url: str, params: dict | None = None, weight: float = 1.0,
+            retries: int | None = None) -> requests.Response:
         last = None
-        for attempt in range(1, self.retries + 1):
+        retries = retries or self.retries
+        for attempt in range(1, retries + 1):
             self.limiter.wait(weight)
             self.requests_made += 1
             try:
                 r = self.session.get(url, params=params, timeout=self.timeout)
             except (requests.ConnectionError, requests.Timeout) as e:
                 last = f"{type(e).__name__}"
-                self._back_off(attempt, None, last)
+                self._back_off(attempt, None, last, retries)
                 continue
             if r.status_code in RETRY_STATUS:
                 last = f"HTTP {r.status_code}"
-                self._back_off(attempt, r.headers.get("Retry-After"), last)
+                self._back_off(attempt, r.headers.get("Retry-After"), last, retries)
                 continue
             if r.status_code >= 400:
                 raise SourceError(f"{self.name}: HTTP {r.status_code} for {_safe(url)}: {r.text[:300]}")
             return r
-        raise SourceError(f"{self.name}: gave up on {_safe(url)} after {self.retries} attempts ({last})")
+        raise SourceError(f"{self.name}: gave up on {_safe(url)} after {retries} attempts ({last})")
 
-    def _back_off(self, attempt: int, retry_after: str | None, why: str) -> None:
+    def _back_off(self, attempt: int, retry_after: str | None, why: str, retries: int) -> None:
+        if attempt == retries:
+            return                        # no wait after the last attempt: the caller decides what to do next
         wait = float(retry_after) if retry_after and retry_after.isdigit() else min(15 * 2 ** (attempt - 1), 600)
-        log.warning("%s: %s, retry %d/%d in %.0f s", self.name, why, attempt, self.retries, wait)
+        log.warning("%s: %s, retry %d/%d in %.0f s", self.name, why, attempt, retries - 1, wait)
         self.sleep(wait)
 
 

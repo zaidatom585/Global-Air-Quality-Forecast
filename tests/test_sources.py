@@ -31,13 +31,50 @@ def test_a_station_keeps_all_its_records_and_sensors():
             location(5509, "Anand Vihar, Delhi", [14521], True, 3100, 1460, 28.6470, 77.3153),   # same spot, retired
             location(7, "Cheap sensor", [70], False, 4000, 0, 28.50, 77.10),
             location(8, "New monitor", [80], True, 200, 0, 28.70, 77.20),
-            location(9, "Dead monitor", [90], True, 5000, 60, 28.55, 77.25)]
+            location(9, "Dead monitor", [90], True, 5000, 60, 28.55, 77.25),
+            location(10, "Test Location 1", [100], True, 9000, 0, 28.40, 77.00),               # a test device
+            location(11, "NASA GSFC Rutgers Calib. N10", [110], True, 9000, 0, 28.41, 77.01)]   # a calibration unit
     f = FakeFetcher(lambda url, p: FakeResponse({"results": locs}))
     ranked = openaq.rank_sites(openaq.candidate_sensors(f, CITY), NOW, keep=2)
     assert set(ranked["sensor_id"]) == {12235610, 384, 14521, 80}       # whole Anand Vihar site, then New monitor
     assert ranked.loc[ranked["sensor_id"] == 14521, "site"].iloc[0] == "Anand Vihar, New Delhi"
     assert ranked["site_rank"].tolist() == [1, 1, 1, 2]
     assert 9999 not in set(ranked["sensor_id"])                          # PM10 ignored
+    assert not {100, 110} & set(ranked["sensor_id"])                     # test and calibration units skipped
+
+
+def test_search_falls_back_to_a_box_when_radius_search_fails():
+    def answer(url, p):
+        if "radius" in p:
+            raise SourceError("openaq: HTTP 500")
+        return FakeResponse({"results": [location(1, "Good monitor", [11], True, 900, 0)]})
+    f = FakeFetcher(answer)
+    df = openaq.candidate_sensors(f, CITY)
+    assert list(df["sensor_id"]) == [11]
+    assert "bbox" in f.calls[-1][1]
+
+
+def test_one_failing_city_does_not_stop_the_others(tmp_path):
+    from aqcast.settings import Settings
+    good = location(1, "Good monitor", [11], True, 900, 0)
+
+    def answer(url, p):
+        bad_city = p.get("coordinates", "").startswith("10.0") or p.get("bbox", "").startswith("9.")
+        if "locations" in url and bad_city:                 # every kind of search fails for this city
+            raise SourceError("openaq: HTTP 500")
+        if "locations" in url:
+            return FakeResponse({"results": [good]})
+        return FakeResponse({"results": [{"datetimeFirst": iso(NOW - timedelta(days=900)), "datetimeLast": iso(NOW)}]})
+
+    s = Settings(cities=(), fire_regions={}, data_dir=tmp_path)
+    bad = City("Bad", "bad", "XX", 10.0, 10.0, "south_asia")
+    written = {}
+    openaq.write_frame, real = (lambda df, path: written.update(df=df)), openaq.write_frame
+    try:
+        out = openaq.choose_sensors(s, [bad, CITY], f=FakeFetcher(answer))
+    finally:
+        openaq.write_frame = real
+    assert list(out["city"].unique()) == ["testville"]
 
 
 def test_hours_filtered_to_window_and_paged():

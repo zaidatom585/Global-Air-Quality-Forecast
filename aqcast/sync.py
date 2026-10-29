@@ -46,7 +46,10 @@ def _run(name: str, fn, results: dict) -> None:
 
 def cmd_sensors(s: cfg.Settings, args) -> dict:
     results: dict = {}
-    _run("openaq_sensors", lambda: {"sensors": len(openaq.choose_sensors(s, s.pick(args.cities)))}, results)
+    def choose():
+        out = openaq.choose_sensors(s, s.pick(args.cities))
+        return {"sensors": len(out), "cities": int(out["city"].nunique())}
+    _run("openaq_sensors", choose, results)
     return results
 
 

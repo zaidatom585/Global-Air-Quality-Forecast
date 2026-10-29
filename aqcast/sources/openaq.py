@@ -12,6 +12,7 @@ Two steps:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 
@@ -35,7 +36,8 @@ def fetcher(settings: Settings) -> Fetcher:
     if not settings.openaq_key:
         raise MissingKey("OPENAQ_API_KEY is not set")
     # Free tier: 60 requests a minute and 2,000 an hour. Stay a little under both.
-    return Fetcher("openaq", RateLimiter(per_minute=55, per_hour=1900), headers={"X-API-Key": settings.openaq_key})
+    return Fetcher("openaq", RateLimiter(per_minute=55, per_hour=1900), headers={"X-API-Key": settings.openaq_key},
+                   retries=4)
 
 
 def _utc(value: dict | None) -> pd.Timestamp | None:
@@ -50,11 +52,33 @@ def _km(lat1, lon1, lat2, lon2) -> float:
 
 
 # ----------------------------------------------------------------------------------------------- sensors
+def find_locations(f: Fetcher, city: City) -> list[dict]:
+    """PM2.5 locations around a city. OpenAQ's search fails for some places (HTTP 500 every time), so if the
+    usual 25 km radius search fails, try a box of the same size, then a smaller radius."""
+    dlat = RADIUS_M / 111_000
+    dlon = dlat / max(cos(radians(city.lat)), 0.2)
+    attempts = [
+        ("25 km radius", {"coordinates": f"{city.lat},{city.lon}", "radius": RADIUS_M}),
+        ("box", {"bbox": f"{city.lon - dlon:.4f},{city.lat - dlat:.4f},{city.lon + dlon:.4f},{city.lat + dlat:.4f}"}),
+        ("10 km radius", {"coordinates": f"{city.lat},{city.lon}", "radius": 10_000}),
+    ]
+    errors: list[str] = []
+    last: Exception | None = None
+    for how, params in attempts:
+        try:
+            r = f.get(f"{API}/locations", params={**params, "parameters_id": PM25, "limit": 1000}, retries=2)
+            if errors:
+                log.info("%-14s found with a %s search after: %s", city.name, how, "; ".join(errors))
+            return r.json().get("results", [])
+        except SourceError as e:
+            errors.append(f"{how} failed")
+            last = e
+    raise SourceError(f"every search failed ({'; '.join(errors)}): {last}")
+
+
 def candidate_sensors(f: Fetcher, city: City) -> pd.DataFrame:
-    r = f.get(f"{API}/locations", params={"coordinates": f"{city.lat},{city.lon}", "radius": RADIUS_M,
-                                          "parameters_id": PM25, "limit": 1000})
     rows = []
-    for loc in r.json().get("results", []):
+    for loc in find_locations(f, city):
         coords = loc.get("coordinates") or {}
         for s in loc.get("sensors", []):
             if (s.get("parameter") or {}).get("id") != PM25:
@@ -79,6 +103,8 @@ def candidate_sensors(f: Fetcher, city: City) -> pd.DataFrame:
 
 
 SITE_RADIUS_KM = 0.5         # location records this close together are one physical station
+# Test, demo and calibration units aren't monitoring stations.
+NOT_A_STATION = re.compile(r"\b(?:test|demo|testing|trial|prototype|calib\.?|calibration)(?:\b|\s)", re.I)
 
 
 def group_sites(df: pd.DataFrame) -> pd.DataFrame:
@@ -111,12 +137,15 @@ def rank_sites(df: pd.DataFrame, now: datetime, keep: int = SITES_PER_CITY) -> p
     then the closest. A site is active if any of its records reported in the last 7 days."""
     if df.empty:
         return df
+    df = df[~df["location"].fillna("").str.contains(NOT_A_STATION)]
+    if df.empty:
+        return df
     df = group_sites(df)
     df["first_ts"] = pd.to_datetime(df["first_utc"], utc=True)
     df["last_ts"] = pd.to_datetime(df["last_utc"], utc=True)
     sites = df.groupby("site_id").agg(monitor=("reference_monitor", "max"), first=("first_ts", "min"),
                                       last=("last_ts", "max"), distance=("distance_km", "min"))
-    cutoff = pd.Timestamp(now) - pd.Timedelta(days=7)
+    cutoff = pd.Timestamp(now - timedelta(days=7))
     sites = sites[sites["last"] >= cutoff]
     sites["first"] = sites["first"].fillna(pd.Timestamp(now))
     best = sites.sort_values(["monitor", "first", "distance"], ascending=[False, True, True]).head(keep).index
@@ -143,9 +172,14 @@ def choose_sensors(settings: Settings, cities: list[City], f: Fetcher | None = N
     f = f or fetcher(settings)
     now = utc_now()
     start = pd.Timestamp(as_utc_midnight(HISTORY_START))
-    picked = []
+    picked, failed = [], []
     for city in cities:
-        ranked = rank_sites(candidate_sensors(f, city), now)
+        try:
+            ranked = rank_sites(candidate_sensors(f, city), now)
+        except SourceError as e:   # one city's OpenAQ error shouldn't stop the others; rerun with --cities later
+            log.warning("%-14s skipped: %s", city.name, e)
+            failed.append(city.slug)
+            continue
         if ranked.empty:
             log.warning("%-14s no active PM2.5 site found", city.name)
             continue
@@ -158,14 +192,19 @@ def choose_sensors(settings: Settings, cities: list[City], f: Fetcher | None = N
         log.info("%-14s %d sites, %d sensors (%s)", city.name, ranked["site_id"].nunique(), len(ranked),
                  "; ".join(f"{n}: {k}" for n, k in ranked.groupby("site", sort=False)["sensor_id"].count().items()))
         picked.append(ranked)
+    if not picked:
+        raise SourceError(f"no city could be checked (failed: {', '.join(failed)})")
     out = pd.concat(picked, ignore_index=True)
     out["chosen_utc"] = now
     path = settings.data_dir / "openaq" / "sensors.parquet"
-    if path.exists():  # keep sensors already chosen for cities not in this run
+    if path.exists():  # keep sensors already chosen for cities not redone in this run (including failed ones)
         old = read_frame(path)
         if "site_id" in old:
-            out = pd.concat([old[~old["city"].isin([c.slug for c in cities])], out], ignore_index=True)
+            out = pd.concat([old[~old["city"].isin(out["city"].unique())], out], ignore_index=True)
     write_frame(out, path)
+    if failed:
+        log.warning("Cities skipped because of OpenAQ errors: %s. Rerun:  sensors --cities %s",
+                    ", ".join(failed), ",".join(failed))
     return out
 
 
@@ -233,6 +272,7 @@ def download_hours(settings: Settings, cities: list[City], start: date, end: dat
                 rows += len(df)
         except SourceError as e:
             log.warning("%s sensor %s: stopped after repeated errors (%s); rerun to resume", s.city, s.sensor_id, e)
+            # fall through: the log line below reports how far this sensor got
             failed.append(int(s.sensor_id))
         log.info("%-14s sensor %-9s %-36.36s %s to %s: %d of %d months fetched", s.city, s.sensor_id, s.location,
                  months[0] if months else "-", months[-1] if months else "-", fetched_here, len(months))

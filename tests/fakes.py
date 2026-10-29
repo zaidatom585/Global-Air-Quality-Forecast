@@ -20,7 +20,7 @@ class FakeFetcher:
         self.calls = []
         self.requests_made = 0
 
-    def get(self, url, params=None):
+    def get(self, url, params=None, weight=1, retries=None):
         self.calls.append((url, dict(params or {})))
         self.requests_made += 1
         return self.answer(url, params or {})
