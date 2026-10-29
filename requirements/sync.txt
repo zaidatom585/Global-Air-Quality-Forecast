@@ -1,0 +1,5 @@
+# Runtime dependencies for the data collector (python -m aqcast.sync)
+requests>=2.32,<3
+pandas>=2.2,<3
+pyarrow>=17,<22
+PyYAML>=6.0,<7

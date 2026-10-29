@@ -1,0 +1,15 @@
+# Downloaded data, models and secrets stay local
+data/
+models/
+.env
+*.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/

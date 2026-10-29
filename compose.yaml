@@ -1,0 +1,31 @@
+# Local development:
+#   docker compose build
+#   docker compose run --rm tests                      run the test suite
+#   docker compose run --rm sync sensors               choose OpenAQ sensors (first time)
+#   docker compose run --rm sync backfill --source all download history since Aug 2022
+#   docker compose run --rm sync update                recent data + current forecasts
+#   docker compose run --rm sync status                what is on disk
+name: aqcast
+
+services:
+  sync:
+    build:
+      context: .
+      dockerfile: containers/sync.Dockerfile
+      target: runtime
+    image: aqcast-sync:dev
+    pull_policy: build
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/data
+
+  tests:
+    build:
+      context: .
+      dockerfile: containers/sync.Dockerfile
+      target: test
+    image: aqcast-sync:test
+    pull_policy: build
+    profiles: ["test"]

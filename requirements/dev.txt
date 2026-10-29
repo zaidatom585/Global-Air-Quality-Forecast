@@ -1,0 +1,2 @@
+# Test dependencies (used by the "test" stage of containers/sync.Dockerfile)
+pytest>=8,<9

@@ -1,0 +1,63 @@
+# Cities the project forecasts. Chosen from a sensor-coverage check of 165 cities on 29 Oct 2026
+# (tools/check_coverage.py): each has PM2.5 data for at least 84% of the past year.
+#
+# fire_region: the satellite fire-search box the city sits in (see fire_regions below).
+# driver: "the main pollution source the project tests for that city.
+
+cities:
+  # South Asia: crop burning, haze, coal
+  - {name: Delhi,        slug: delhi,        country: IN, lat: 28.61, lon: 77.21,   fire_region: south_asia,     driver: crop burning upwind; winter inversions"}
+  - {name: Lahore,       slug: lahore,       country: PK, lat: 31.55, lon: 74.34,   fire_region: south_asia,     driver: "crop burning"}
+  - {name: Kolkata,      slug: kolkata,      country: IN, lat: 22.57, lon: 88.36,   fire_region: south_asia,     driver: "regional haze; coal belt upwind"}
+  - {name: Patna,        slug: patna,        country: IN, lat: 25.59, lon: 85.14,   fire_region: south_asia,     driver: "Indo-Gangetic haze"}
+  - {name: Dhaka,        slug: dhaka,        country: BD, lat: 23.81, lon: 90.41,   fire_region: south_asia,     driver: "brick kilns; haze from upwind"}
+  - {name: Kathmandu,    slug: kathmandu,    country: NP, lat: 27.72, lon: 85.32,   fire_region: south_asia,     driver: "valley that traps smoke"}
+  - {name: Korba,        slug: korba,        country: IN, lat: 22.35, lon: 82.68,   fire_region: south_asia,     driver: "coal power plants"}
+  - {name: Dhanbad,      slug: dhanbad,      country: IN, lat: 23.80, lon: 86.43,   fire_region: south_asia,     driver: "coal mines and plants"}
+  # Central and East Asia
+  - {name: Almaty,       slug: almaty,       country: KZ, lat: 43.24, lon: 76.89,   fire_region: central_asia,   driver: "coal heating in winter"}
+  - {name: Seoul,        slug: seoul,        country: KR, lat: 37.57, lon: 126.98,  fire_region: east_asia,      driver: "cross-border haze from the mainland"}
+  - {name: Tokyo,        slug: tokyo,        country: JP, lat: 35.68, lon: 139.69,  fire_region: east_asia,      driver: "clean megacity; haze from the mainland"}
+  # South-East Asia: seasonal burning and cross-border peat haze
+  - {name: Bangkok,      slug: bangkok,      country: TH, lat: 13.76, lon: 100.50,  fire_region: southeast_asia, driver: "seasonal crop burning"}
+  - {name: Chiang Mai,   slug: chiang-mai,   country: TH, lat: 18.79, lon: 98.98,   fire_region: southeast_asia, driver: "dry-season forest burning"}
+  - {name: Hanoi,        slug: hanoi,        country: VN, lat: 21.03, lon: 105.85,  fire_region: southeast_asia, driver: "crop burning; regional haze"}
+  - {name: Singapore,    slug: singapore,    country: SG, lat: 1.35,  lon: 103.82,  fire_region: southeast_asia, driver: "Indonesian peat fires across the border"}
+  - {name: Kuala Lumpur, slug: kuala-lumpur, country: MY, lat: 3.14,  lon: 101.69,  fire_region: southeast_asia, driver: "Indonesian peat fires across the border"}
+  - {name: Manila,       slug: manila,       country: PH, lat: 14.60, lon: 120.98,  fire_region: southeast_asia, driver: "megacity traffic and shipping"}
+  # North America: wildfire smoke, industry, dust
+  - {name: Los Angeles,  slug: los-angeles,  country: US, lat: 34.05, lon: -118.24, fire_region: north_america,  driver: "wildfires"}
+  - {name: Sacramento,   slug: sacramento,   country: US, lat: 38.58, lon: -121.49, fire_region: north_america,  driver: "wildfires"}
+  - {name: Bakersfield,  slug: bakersfield,  country: US, lat: 35.37, lon: -119.02, fire_region: north_america,  driver: "valley that traps traffic, farm and fire pollution"}
+  - {name: Seattle,      slug: seattle,      country: US, lat: 47.61, lon: -122.33, fire_region: north_america,  driver: "clean city with wildfire smoke episodes"}
+  - {name: Phoenix,      slug: phoenix,      country: US, lat: 33.45, lon: -112.07, fire_region: north_america,  driver: "desert dust and wildfire smoke"}
+  - {name: Houston,      slug: houston,      country: US, lat: 29.76, lon: -95.37,  fire_region: north_america,  driver: "petrochemical industry"}
+  - {name: New York,     slug: new-york,     country: US, lat: 40.71, lon: -74.01,  fire_region: north_america,  driver: "long-range Canadian wildfire smoke"}
+  - {name: Vancouver,    slug: vancouver,    country: CA, lat: 49.28, lon: -123.12, fire_region: north_america,  driver: "wildfires, including smoke from the US"}
+  - {name: Edmonton,     slug: edmonton,     country: CA, lat: 53.55, lon: -113.49, fire_region: north_america,  driver: "boreal wildfires"}
+  - {name: Toronto,      slug: toronto,      country: CA, lat: 43.65, lon: -79.38,  fire_region: north_america,  driver: "long-range wildfire smoke"}
+  - {name: Mexico City,  slug: mexico-city,  country: MX, lat: 19.43, lon: -99.13,  fire_region: north_america,  driver: "urban traffic and industry; few fires"}
+  # Europe
+  - {name: Athens,       slug: athens,       country: GR, lat: 37.98, lon: 23.73,   fire_region: europe,         driver: "Mediterranean summer fires"}
+  - {name: Lisbon,       slug: lisbon,       country: PT, lat: 38.72, lon: -9.14,   fire_region: europe,         driver: "Iberian and Atlantic fires"}
+  - {name: Reykjavik,    slug: reykjavik,    country: IS, lat: 64.15, lon: -21.94,  fire_region: europe,         driver: "cleanest capital checked; control city"}
+  # Africa
+  - {name: Kampala,      slug: kampala,      country: UG, lat: 0.35,  lon: 32.58,   fire_region: east_africa,    driver: "savanna burning"}
+  - {name: Accra,        slug: accra,        country: GH, lat: 5.60,  lon: -0.19,   fire_region: west_africa,    driver: "Harmattan dust; savanna burning"}
+  # Oceania
+  - {name: Canberra,     slug: canberra,     country: AU, lat: -35.28, lon: 149.13, fire_region: oceania,        driver: "bushfire smoke"}
+  - {name: Brisbane,     slug: brisbane,     country: AU, lat: -27.47, lon: 153.03, fire_region: oceania,        driver: "clean subtropical city; bushfire smoke"}
+  - {name: Christchurch, slug: christchurch, country: NZ, lat: -43.53, lon: 172.64, fire_region: oceania,        driver: "winter wood-burner smoke"}
+
+# Boxes searched for satellite fire detections: [west, south, east, north] in degrees.
+# Each box reaches roughly 1,000 km beyond the cities inside it, so upwind fires are captured.
+fire_regions:
+  south_asia:     [60, 5, 98, 38]
+  central_asia:   [55, 33, 92, 55]
+  east_asia:      [105, 20, 150, 52]
+  southeast_asia: [90, -11, 130, 28]
+  north_america:  [-170, 12, -50, 72]
+  europe:         [-30, 30, 45, 72]
+  west_africa:    [-20, -5, 20, 20]
+  east_africa:    [20, -15, 45, 12]
+  oceania:        [110, -50, 180, -8]
