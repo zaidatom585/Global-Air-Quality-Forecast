@@ -1,9 +1,12 @@
 """OpenAQ: ground PM2.5 sensors.
 
 Two steps:
-1. choose_sensors: for each city, keep the best active PM2.5 sensors within 25 km
-   (official monitors first, then the longest records). Saved to data/openaq/sensors.parquet.
-2. download_hours: hourly averages per sensor, one file per sensor and month:
+1. choose_sensors: for each city, keep the 3 best active PM2.5 stations ("sites") within 25 km (official
+   monitors first, then the longest records) with ALL their sensor records: OpenAQ lists many stations
+   several times, under old and re-registered records and old and new sensor ids, and only together do they
+   hold the full history. Each sensor's own first and last dates are looked up. Saved to
+   data/openaq/sensors.parquet.
+2. download_hours: hourly averages per sensor over its own active period, one file per sensor and month:
    data/openaq/hours/sensor=<id>/<YYYY-MM>.parquet
 """
 from __future__ import annotations
@@ -14,7 +17,7 @@ from math import asin, cos, radians, sin, sqrt
 
 import pandas as pd
 
-from aqcast.settings import City, Settings
+from aqcast.settings import HISTORY_START, City, Settings
 from aqcast.storage import as_utc_midnight, fetched_after, month_end, month_starts, read_frame, utc_now, write_frame
 from aqcast.web import Fetcher, MissingKey, RateLimiter, SourceError
 
@@ -23,7 +26,7 @@ log = logging.getLogger(__name__)
 API = "https://api.openaq.org/v3"
 PM25 = 2                    # OpenAQ parameter id for PM2.5
 RADIUS_M = 25_000           # the API's maximum search radius
-SENSORS_PER_CITY = 3          # median of 3 sensors per city; more makes the backfill much longer
+SITES_PER_CITY = 3          # stations per city; each may have several sensor records
 PAGE = 1000
 LATE_DATA_DAYS = 3          # a month counts as complete once it was fetched this long after it ended
 
@@ -75,33 +78,93 @@ def candidate_sensors(f: Fetcher, city: City) -> pd.DataFrame:
     return df
 
 
-def rank_sensors(df: pd.DataFrame, now: datetime, keep: int = SENSORS_PER_CITY) -> pd.DataFrame:
-    """Active in the last 7 days; official monitors first, then the longest record, then the closest."""
+SITE_RADIUS_KM = 0.5         # location records this close together are one physical station
+
+
+def group_sites(df: pd.DataFrame) -> pd.DataFrame:
+    """Give every location record a site id: records within SITE_RADIUS_KM of each other are one station.
+
+    OpenAQ often lists one station several times (old and re-registered records, and old and new sensor ids
+    on one record); together they hold the station's full history.
+    """
+    df = df.copy()
+    locs = df.drop_duplicates("location_id")[["location_id", "lat", "lon"]].sort_values("location_id")
+    site_of: dict = {}
+    centres: list[tuple] = []                     # (site id, lat, lon)
+    for loc in locs.itertuples():
+        site = None
+        if loc.lat is not None and loc.lon is not None and pd.notna(loc.lat):
+            for sid, la, lo in centres:
+                if _km(loc.lat, loc.lon, la, lo) <= SITE_RADIUS_KM:
+                    site = sid
+                    break
+        if site is None:
+            site = loc.location_id
+            centres.append((site, loc.lat, loc.lon))
+        site_of[loc.location_id] = site
+    df["site_id"] = df["location_id"].map(site_of)
+    return df
+
+
+def rank_sites(df: pd.DataFrame, now: datetime, keep: int = SITES_PER_CITY) -> pd.DataFrame:
+    """Every PM2.5 sensor of the best `keep` active sites: official monitors first, then the longest record,
+    then the closest. A site is active if any of its records reported in the last 7 days."""
     if df.empty:
         return df
-    active = df[pd.to_datetime(df["last_utc"], utc=True) >= pd.Timestamp(now) - pd.Timedelta(days=7)].copy()
-    # The same physical sensor can appear under two location records; keep one per location name.
-    active = active.drop_duplicates(subset=["location", "provider"], keep="first")
-    active["first_sort"] = pd.to_datetime(active["first_utc"], utc=True).fillna(pd.Timestamp(now))
-    active = active.sort_values(["reference_monitor", "first_sort", "distance_km"], ascending=[False, True, True])
-    return active.drop(columns="first_sort").head(keep).reset_index(drop=True)
+    df = group_sites(df)
+    df["first_ts"] = pd.to_datetime(df["first_utc"], utc=True)
+    df["last_ts"] = pd.to_datetime(df["last_utc"], utc=True)
+    sites = df.groupby("site_id").agg(monitor=("reference_monitor", "max"), first=("first_ts", "min"),
+                                      last=("last_ts", "max"), distance=("distance_km", "min"))
+    cutoff = pd.Timestamp(now) - pd.Timedelta(days=7)
+    sites = sites[sites["last"] >= cutoff]
+    sites["first"] = sites["first"].fillna(pd.Timestamp(now))
+    best = sites.sort_values(["monitor", "first", "distance"], ascending=[False, True, True]).head(keep).index
+    out = df[df["site_id"].isin(best)].copy()
+    # The site's name is that of its most recent record.
+    names = out.sort_values("last_ts").groupby("site_id")["location"].last()
+    out["site"] = out["site_id"].map(names)
+    out["site_rank"] = out["site_id"].map({sid: i + 1 for i, sid in enumerate(best)})
+    out = out.drop(columns=["first_ts", "last_ts"]).drop_duplicates("sensor_id")
+    return out.sort_values(["site_rank", "sensor_id"]).reset_index(drop=True)
+
+
+def sensor_dates(f: Fetcher, sensor_id: int) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """First and last reading of one sensor (more precise than its location record's dates)."""
+    try:
+        res = f.get(f"{API}/sensors/{sensor_id}").json().get("results") or [{}]
+    except SourceError as e:
+        log.warning("sensor %s: could not read its dates (%s)", sensor_id, e)
+        return None, None
+    return _utc(res[0].get("datetimeFirst")), _utc(res[0].get("datetimeLast"))
 
 
 def choose_sensors(settings: Settings, cities: list[City], f: Fetcher | None = None) -> pd.DataFrame:
     f = f or fetcher(settings)
     now = utc_now()
+    start = pd.Timestamp(as_utc_midnight(HISTORY_START))
     picked = []
     for city in cities:
-        ranked = rank_sensors(candidate_sensors(f, city), now)
-        log.info("%-14s %d sensors kept (%d official monitors)", city.name, len(ranked),
-                 int(ranked["reference_monitor"].sum()) if not ranked.empty else 0)
+        ranked = rank_sites(candidate_sensors(f, city), now)
+        if ranked.empty:
+            log.warning("%-14s no active PM2.5 site found", city.name)
+            continue
+        dates = [sensor_dates(f, sid) for sid in ranked["sensor_id"]]
+        # Prefer each sensor's own dates; fall back to its location record's.
+        ranked["first_utc"] = [d[0] if d[0] is not None else r for d, r in zip(dates, ranked["first_utc"])]
+        ranked["last_utc"] = [d[1] if d[1] is not None else r for d, r in zip(dates, ranked["last_utc"])]
+        last = pd.to_datetime(ranked["last_utc"], utc=True)
+        ranked = ranked[last.isna() | (last >= start)]              # sensors that ended before Aug 2022 add nothing
+        log.info("%-14s %d sites, %d sensors (%s)", city.name, ranked["site_id"].nunique(), len(ranked),
+                 "; ".join(f"{n}: {k}" for n, k in ranked.groupby("site", sort=False)["sensor_id"].count().items()))
         picked.append(ranked)
-    out = pd.concat([p for p in picked if not p.empty], ignore_index=True)
+    out = pd.concat(picked, ignore_index=True)
     out["chosen_utc"] = now
     path = settings.data_dir / "openaq" / "sensors.parquet"
     if path.exists():  # keep sensors already chosen for cities not in this run
         old = read_frame(path)
-        out = pd.concat([old[~old["city"].isin([c.slug for c in cities])], out], ignore_index=True)
+        if "site_id" in old:
+            out = pd.concat([old[~old["city"].isin([c.slug for c in cities])], out], ignore_index=True)
     write_frame(out, path)
     return out
 
@@ -111,6 +174,8 @@ def load_sensors(settings: Settings, cities: list[City]) -> pd.DataFrame:
     if not path.exists():
         raise SourceError("No sensors chosen yet. Run:  sensors")
     df = read_frame(path)
+    if "site_id" not in df:
+        raise SourceError("sensors.parquet is from an older version. Run:  sensors")
     return df[df["city"].isin([c.slug for c in cities])]
 
 
@@ -140,27 +205,39 @@ def month_path(settings: Settings, sensor_id: int, month: date):
 
 
 def download_hours(settings: Settings, cities: list[City], start: date, end: date, f: Fetcher | None = None) -> dict:
-    """Backfill: one request (or a few pages) per sensor and month; complete months already on disk are skipped."""
+    """Backfill: one request (or a few pages) per sensor and month, over each sensor's own active period;
+    complete months already on disk are skipped, and a sensor that keeps failing is skipped, not fatal."""
     f = f or fetcher(settings)
     sensors = load_sensors(settings, cities)
     done = skipped = rows = 0
+    failed = []
     for s in sensors.itertuples():
         first = pd.Timestamp(s.first_utc).date() if pd.notna(s.first_utc) else start
-        for m in month_starts(max(start, date(first.year, first.month, 1)), end):
-            path = month_path(settings, s.sensor_id, m)
-            complete_after = as_utc_midnight(month_end(m)) + timedelta(days=LATE_DATA_DAYS)
-            if fetched_after(path, complete_after):
-                skipped += 1
-                continue
-            lo = as_utc_midnight(m)                       # the whole month, never a slice of it
-            hi = as_utc_midnight(month_end(m)) + timedelta(days=1)
-            df = fetch_hours(f, s.sensor_id, lo, hi)
-            df["fetched_utc"] = utc_now()
-            write_frame(df, path)
-            done += 1
-            rows += len(df)
-        log.info("%-14s sensor %-9s %s: months fetched so far %d", s.city, s.sensor_id, s.location, done)
-    return {"months_fetched": done, "months_skipped": skipped, "rows": rows, "requests": f.requests_made}
+        last = pd.Timestamp(s.last_utc).date() if pd.notna(s.last_utc) else end
+        months = month_starts(max(start, date(first.year, first.month, 1)), min(end, last))
+        fetched_here = 0
+        try:
+            for m in months:
+                path = month_path(settings, s.sensor_id, m)
+                complete_after = as_utc_midnight(month_end(m)) + timedelta(days=LATE_DATA_DAYS)
+                if fetched_after(path, complete_after):
+                    skipped += 1
+                    continue
+                lo = as_utc_midnight(m)                       # the whole month, never a slice of it
+                hi = as_utc_midnight(month_end(m)) + timedelta(days=1)
+                df = fetch_hours(f, s.sensor_id, lo, hi)
+                df["fetched_utc"] = utc_now()
+                write_frame(df, path)
+                done += 1
+                fetched_here += 1
+                rows += len(df)
+        except SourceError as e:
+            log.warning("%s sensor %s: stopped after repeated errors (%s); rerun to resume", s.city, s.sensor_id, e)
+            failed.append(int(s.sensor_id))
+        log.info("%-14s sensor %-9s %-36.36s %s to %s: %d of %d months fetched", s.city, s.sensor_id, s.location,
+                 months[0] if months else "-", months[-1] if months else "-", fetched_here, len(months))
+    return {"months_fetched": done, "months_skipped": skipped, "rows": rows, "failed_sensors": failed,
+            "requests": f.requests_made}
 
 
 def update_recent(settings: Settings, cities: list[City], hours: int = 72, f: Fetcher | None = None) -> dict:
@@ -169,6 +246,9 @@ def update_recent(settings: Settings, cities: list[City], hours: int = 72, f: Fe
     sensors = load_sensors(settings, cities)
     end = utc_now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
     start = end - timedelta(hours=hours)
+    # Only sensors still reporting when the list was made; retired records have nothing new.
+    chosen = pd.to_datetime(sensors["chosen_utc"], utc=True)
+    sensors = sensors[pd.to_datetime(sensors["last_utc"], utc=True) >= chosen - pd.Timedelta(days=14)]
     rows = 0
     for s in sensors.itertuples():
         new = fetch_hours(f, s.sensor_id, start, end)

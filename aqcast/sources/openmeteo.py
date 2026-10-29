@@ -29,7 +29,7 @@ import pandas as pd
 
 from aqcast.settings import HISTORY_START, City, Settings
 from aqcast.storage import as_utc_midnight, fetched_after, month_end, month_starts, utc_now, write_frame
-from aqcast.web import Fetcher, RateLimiter, SourceError
+from aqcast.web import Fetcher, RateLimiter, SharedLimiter, SourceError
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +47,13 @@ SNAPSHOT_EVERY_HOURS = 6      # weather models and CAMS issue new runs every 6-1
 REFRESH_HOURS = {"weather": 24, "cams": 6}   # how often the hourly update re-downloads the current month
 
 
-def fetcher() -> Fetcher:
-    # Stay under the free tier's 600 a minute, 5,000 an hour and 10,000 a day, counted by weight.
-    return Fetcher("open-meteo", RateLimiter(per_minute=400, per_hour=4000, per_day=9000, gap=0.2))
+def fetcher(settings: Settings | None = None) -> Fetcher:
+    """Stay under the free tier's 600 a minute, 5,000 an hour and 10,000 a day, counted by weight. The count is
+    kept in a file under data/, so backfills running in parallel windows share one budget."""
+    if settings is None:
+        return Fetcher("open-meteo", RateLimiter(per_minute=400, per_hour=4000, per_day=9000, gap=0.2))
+    ledger = settings.data_dir / "state" / "open-meteo-calls.log"
+    return Fetcher("open-meteo", SharedLimiter(ledger, per_minute=400, per_hour=4000, per_day=9000, gap=0.2))
 
 
 def weight(days: int, n_vars: int) -> float:
@@ -94,7 +98,7 @@ def download_history(settings: Settings, cities: list[City], start: date, end: d
                      refresh_hours: float | None = None, f: Fetcher | None = None) -> dict:
     """One file per city and month. A month already downloaded after it ended is skipped. With refresh_hours,
     an unfinished month is only re-downloaded if its file is older than that (used by the hourly update)."""
-    f = f or fetcher()
+    f = f or fetcher(settings)
     spec = KINDS[kind]
     last_day = date.today() - timedelta(days=REANALYSIS_LAG_DAYS) if kind == "weather" else date.today()
     end = min(end, last_day)
@@ -139,7 +143,7 @@ def issue_time():
 
 def snapshot(settings: Settings, cities: list[City], f: Fetcher | None = None) -> dict:
     """Save the current weather and CAMS forecasts for every city, once per 6-hour slot."""
-    f = f or fetcher()
+    f = f or fetcher(settings)
     issued = issue_time()
     stamp = f"issued={issued:%Y-%m-%dT%H}"
     saved = 0

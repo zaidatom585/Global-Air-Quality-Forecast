@@ -17,22 +17,27 @@ def iso(dt):
 
 
 # ------------------------------------------------------------------------------------------------ OpenAQ
-def location(name, sid, monitor, first_days_ago, last_days_ago, param=2, lat=28.6, lon=77.2):
-    return {"id": sid * 10, "name": name, "isMonitor": monitor, "provider": {"name": "p"},
+def location(lid, name, sensor_ids, monitor, first_days_ago, last_days_ago, lat=28.6, lon=77.2):
+    return {"id": lid, "name": name, "isMonitor": monitor, "provider": {"name": "p"},
             "coordinates": {"latitude": lat, "longitude": lon},
             "datetimeFirst": iso(NOW - timedelta(days=first_days_ago)),
             "datetimeLast": iso(NOW - timedelta(days=last_days_ago)),
-            "sensors": [{"id": sid, "parameter": {"id": param}}, {"id": sid + 1000, "parameter": {"id": 1}}]}
+            "sensors": [{"id": i, "parameter": {"id": 2}} for i in sensor_ids] + [{"id": 9999, "parameter": {"id": 1}}]}
 
 
-def test_sensors_ranked_monitors_first_and_stale_dropped():
-    locs = [location("cheap-old", 1, False, 3000, 1), location("monitor-new", 2, True, 100, 0),
-            location("monitor-old", 3, True, 2000, 0), location("dead", 4, True, 4000, 60),
-            location("monitor-old", 5, True, 2000, 0)]          # duplicate record of the same site
+def test_a_station_keeps_all_its_records_and_sensors():
+    # Like OpenAQ's Delhi data: one station listed as an old record and a current record with two sensor ids.
+    locs = [location(235, "Anand Vihar, New Delhi", [12235610, 384], True, 3900, 0, 28.6469, 77.3152),
+            location(5509, "Anand Vihar, Delhi", [14521], True, 3100, 1460, 28.6470, 77.3153),   # same spot, retired
+            location(7, "Cheap sensor", [70], False, 4000, 0, 28.50, 77.10),
+            location(8, "New monitor", [80], True, 200, 0, 28.70, 77.20),
+            location(9, "Dead monitor", [90], True, 5000, 60, 28.55, 77.25)]
     f = FakeFetcher(lambda url, p: FakeResponse({"results": locs}))
-    ranked = openaq.rank_sensors(openaq.candidate_sensors(f, CITY), NOW)
-    assert list(ranked["sensor_id"]) == [3, 2, 1]                 # dead dropped, duplicate dropped, PM10 ignored
-    assert ranked["distance_km"].iloc[0] == 0.0
+    ranked = openaq.rank_sites(openaq.candidate_sensors(f, CITY), NOW, keep=2)
+    assert set(ranked["sensor_id"]) == {12235610, 384, 14521, 80}       # whole Anand Vihar site, then New monitor
+    assert ranked.loc[ranked["sensor_id"] == 14521, "site"].iloc[0] == "Anand Vihar, New Delhi"
+    assert ranked["site_rank"].tolist() == [1, 1, 1, 2]
+    assert 9999 not in set(ranked["sensor_id"])                          # PM10 ignored
 
 
 def test_hours_filtered_to_window_and_paged():

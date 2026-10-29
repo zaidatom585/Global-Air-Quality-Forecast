@@ -35,9 +35,9 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 15 tests, no network needed
+docker compose run --rm tests   # 16 tests, no network needed
 
-docker compose run --rm sync sensors                 # choose up to 3 sensors per city
+docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
 docker compose run --rm sync update                  # recent data + current forecasts (meant to run hourly)
 docker compose run --rm sync status                  # files, rows and newest timestamp per source
@@ -51,7 +51,7 @@ A source whose key is missing is skipped, so the others still run.
 Parquet files under `data/`, one file per natural period, written atomically:
 
 ```
-data/openaq/sensors.parquet                                   chosen sensors per city
+data/openaq/sensors.parquet                                   chosen stations and sensor records per city
 data/openaq/hours/sensor=<id>/<YYYY-MM>.parquet               hourly PM2.5 per sensor
 data/firms/<region>/<satellite>/<window>_<source>_<part>.parquet   fire detections, 10-day windows
 data/weather/history/city=<slug>/<YYYY-MM>.parquet            hourly weather
@@ -73,8 +73,12 @@ Design choices:
 - **Polite to free APIs.** Each source has its own rate limiter and retries throttling and server errors with
   backoff. OpenAQ stays under 60 requests a minute and 2,000 an hour. Open-Meteo counts a request covering more
   than two weeks as several calls, so each request passes that weight to the limiter, which also keeps a daily
-  budget; the hourly update only refreshes the current month when its copy is stale (CAMS every 6 hours,
-  weather daily), which uses under 1,000 of the 10,000 calls a day.
+  budget shared through a file under `data/state/`, so backfills in parallel windows can't overrun it together.
+  The hourly update only refreshes the current month when its copy is stale (CAMS every 6 hours, weather
+  daily), which uses under 1,000 of the 10,000 calls a day.
+- **One station, many records.** OpenAQ often lists a station several times (old and re-registered records,
+  old and new sensor ids). Records within 500 m are grouped into one site and every sensor record is
+  downloaded over its own active period, so the full 2022-2026 history is kept.
 
 ## Project layout
 

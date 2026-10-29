@@ -44,6 +44,20 @@ def test_rate_limiter_counts_weight_per_day():
     assert t[0] >= 86400
 
 
+def test_shared_limiter_sees_other_processes(tmp_path):
+    from aqcast.web import SharedLimiter
+    import time
+    ledger = tmp_path / "calls.log"
+    ledger.write_text(f"{time.time() - 10:.3f} 9\n")      # another process just used 9 of 10
+    waited = []
+    lim = SharedLimiter(ledger, per_day=10, sleep=lambda d: waited.append(d) or (_ for _ in ()).throw(StopIteration))
+    try:
+        lim.wait(3)
+    except StopIteration:
+        pass
+    assert waited and waited[0] > 80000                      # it must wait about a day, not go ahead
+
+
 def test_key_in_url_is_hidden():
     url = "https://firms.modaps.eosdis.nasa.gov/api/area/csv/0123456789abcdef0123456789abcdef/VIIRS_SNPP_NRT/1,2,3,4/1"
     assert "0123456789abcdef" not in _safe(url)

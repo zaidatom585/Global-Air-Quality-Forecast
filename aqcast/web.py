@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from pathlib import Path
 
 import requests
 
@@ -52,6 +53,39 @@ class RateLimiter:
             if delay > 30:
                 log.info("Rate limit reached; waiting %.0f s", delay)
             self.sleep(delay)
+
+
+class SharedLimiter(RateLimiter):
+    """A RateLimiter whose record of past requests lives in a file, so several processes or containers that use
+    the same API (and the same IP address) share one budget. Each line of the file is "<unix time> <weight>"."""
+
+    def __init__(self, ledger: Path, **kw):
+        super().__init__(clock=time.time, **kw)
+        self.ledger = Path(ledger)
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load(self) -> None:
+        now = time.time()
+        longest = max((w for w, _ in self.windows), default=0.0)
+        entries: list[tuple[float, float]] = []
+        if self.ledger.exists():
+            for line in self.ledger.read_text(encoding="utf-8").splitlines():
+                try:
+                    t, w = line.split()
+                    if now - float(t) < longest:
+                        entries.append((float(t), float(w)))
+                except ValueError:
+                    continue                              # a half-written line from another process
+            if self.ledger.stat().st_size > 1_000_000:  # keep the file small: rewrite with the last day only
+                self.ledger.write_text("".join(f"{t:.3f} {w:g}\n" for t, w in entries), encoding="utf-8")
+        self.sent = deque(sorted(entries))
+
+    def wait(self, weight: float = 1.0) -> None:
+        self._load()
+        super().wait(weight)
+        t, w = self.sent[-1]
+        with self.ledger.open("a", encoding="utf-8") as fh:
+            fh.write(f"{t:.3f} {w:g}\n")
 
 
 class Fetcher:
