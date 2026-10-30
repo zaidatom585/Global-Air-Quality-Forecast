@@ -95,8 +95,8 @@ def test_hours_filtered_to_window_and_paged():
 
 
 # ------------------------------------------------------------------------------------------------- FIRMS
-AVAIL = {"VIIRS_SNPP_SP": (date(2012, 1, 20), date(2026, 6, 25)),     # archive ends mid-window
-         "VIIRS_SNPP_NRT": (date(2026, 6, 26), date(2026, 10, 28))}
+AVAIL = {"VIIRS_SNPP_SP": (date(2012, 1, 20), date(2026, 6, 23)),     # archive ends mid-window
+         "VIIRS_SNPP_NRT": (date(2026, 6, 24), date(2026, 10, 28))}
 
 
 def test_grid_is_fixed_whatever_the_start():
@@ -104,11 +104,11 @@ def test_grid_is_fixed_whatever_the_start():
 
 
 def test_window_spanning_archive_end_splits_into_sp_and_nrt():
-    w = [g for g in firms.grid(date(2026, 6, 1), date(2026, 7, 31)) if g <= date(2026, 6, 25) < g + timedelta(days=10)][0]
+    w = [g for g in firms.grid(date(2026, 6, 1), date(2026, 7, 31)) if g <= date(2026, 6, 23) < g + timedelta(days=firms.WINDOW_DAYS)][0]
     parts = firms.plan_parts(w, "VIIRS_SNPP", AVAIL)
     assert [p[2] for p in parts] == ["VIIRS_SNPP_SP", "VIIRS_SNPP_NRT"]
-    assert sum(p[1] for p in parts) == 10
-    assert parts[1][0] == date(2026, 6, 26)
+    assert sum(p[1] for p in parts) == firms.WINDOW_DAYS
+    assert parts[1][0] == date(2026, 6, 24)
 
 
 def test_recent_window_is_cut_only_by_availability():
@@ -146,3 +146,20 @@ def test_open_meteo_request_weight():
 def test_snapshot_slot_is_six_hourly(monkeypatch):
     monkeypatch.setattr(openmeteo, "utc_now", lambda: datetime(2026, 10, 29, 17, 42, tzinfo=timezone.utc))
     assert openmeteo.issue_time() == datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+
+
+def test_firms_waits_when_transaction_limit_is_reached():
+    csv = ("latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,instrument,confidence,version,"
+           "bright_ti5,frp,daynight\n30.1,75.2,330.1,0.4,0.4,2026-10-20,812,N,VIIRS,n,2.0NRT,290.1,5.3,D\n")
+    answers = [SourceError("firms: HTTP 400 for ...: Exceeding allowed transaction limit."), FakeResponse(text=csv)]
+
+    def answer(url, p):
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+    f = FakeFetcher(answer)
+    waits = []
+    f.sleep = waits.append
+    df = firms.fetch_window(f, "k", "VIIRS_SNPP_NRT", (60, 5, 98, 38), date(2026, 10, 18), 5)
+    assert len(df) == 1 and waits == [firms.LIMIT_WAIT]

@@ -35,7 +35,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 18 tests, no network needed
+docker compose run --rm tests   # 19 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -53,7 +53,7 @@ Parquet files under `data/`, one file per natural period, written atomically:
 ```
 data/openaq/sensors.parquet                                   chosen stations and sensor records per city
 data/openaq/hours/sensor=<id>/<YYYY-MM>.parquet               hourly PM2.5 per sensor
-data/firms/<region>/<satellite>/<window>_<source>_<part>.parquet   fire detections, 10-day windows
+data/firms/<region>/<satellite>/<window>_<source>_<part>.parquet   fire detections, 5-day windows
 data/weather/history/city=<slug>/<YYYY-MM>.parquet            hourly weather
 data/cams/history/city=<slug>/<YYYY-MM>.parquet               hourly CAMS PM2.5, dust, aerosols
 data/forecasts/{weather,cams}/issued=<YYYY-MM-DDTHH>/<slug>.parquet   forecasts as issued, every 6 hours

@@ -1,6 +1,6 @@
 """NASA FIRMS: satellite fire detections (VIIRS), searched by fire region box.
 
-Files: data/firms/<region>/<satellite>/<window start>_<source>_<part start>.parquet. Windows are 10 days on a
+Files: data/firms/<region>/<satellite>/<window start>_<source>_<part start>.parquet. Windows are 5 days on a
 fixed grid; a window that spans the end of the archive is saved in two parts (SP, then NRT).
 
 FIRMS has two versions of each satellite's data:
@@ -24,9 +24,11 @@ from aqcast.web import Fetcher, MissingKey, RateLimiter, SourceError
 log = logging.getLogger(__name__)
 
 API = "https://firms.modaps.eosdis.nasa.gov/api"
-WINDOW_DAYS = 10            # the area API returns at most 10 days per request
+WINDOW_DAYS = 5             # the area API returns at most 5 days per request (it was 10 until 2026)
 SETTLE_DAYS = 7             # late detections are added to NRT for a few days after the fact
 SATELLITES = ("VIIRS_SNPP", "VIIRS_NOAA20")
+LIMIT_WAIT = 660            # the key's transaction allowance resets over 10 minutes; wait a little longer
+LIMIT_RETRIES = 6
 KEEP = ["latitude", "longitude", "acq_date", "acq_time", "frp", "confidence", "daynight", "bright_ti4", "bright_ti5",
         "scan", "track", "satellite", "instrument", "version"]
 
@@ -49,7 +51,7 @@ def availability(f: Fetcher, key: str) -> dict[str, tuple[date, date]]:
 
 
 def grid(start: date, end: date, anchor: date = HISTORY_START) -> list[date]:
-    """Window starts every 10 days from a fixed anchor, so the same window always has the same file name."""
+    """Window starts every WINDOW_DAYS days from a fixed anchor, so the same window always has the same file name."""
     first = anchor + timedelta(days=((start - anchor).days // WINDOW_DAYS) * WINDOW_DAYS)
     out, d = [], first
     while d <= end:
@@ -96,7 +98,17 @@ def parse(text: str) -> pd.DataFrame:
 def fetch_window(f: Fetcher, key: str, source: str, box: tuple, start: date, days: int) -> pd.DataFrame:
     w, s, e, n = box
     url = f"{API}/area/csv/{key}/{source}/{w:g},{s:g},{e:g},{n:g}/{days}/{start:%Y-%m-%d}"
-    df = parse(f.get(url).text)
+    for attempt in range(1, LIMIT_RETRIES + 1):
+        try:
+            df = parse(f.get(url).text)
+            break
+        except SourceError as e:
+            # FIRMS counts a large request as several transactions; when the key's 10-minute allowance is used
+            # up it answers "Exceeding allowed transaction limit". Wait for the window to pass, then go on.
+            if "transaction limit" not in str(e).lower() or attempt == LIMIT_RETRIES:
+                raise
+            log.info("FIRMS transaction limit reached; waiting %d s (%d/%d)", LIMIT_WAIT, attempt, LIMIT_RETRIES - 1)
+            f.sleep(LIMIT_WAIT)
     # Keep only detections inside the requested days (FIRMS dates are UTC).
     keep = (df["detected_utc"] >= pd.Timestamp(as_utc_midnight(start))) & \
            (df["detected_utc"] < pd.Timestamp(as_utc_midnight(start + timedelta(days=days))))
