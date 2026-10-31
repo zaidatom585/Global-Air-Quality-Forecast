@@ -7,6 +7,8 @@
 #   docker compose run --rm sync status                what is on disk
 #   docker compose run --rm prepare all                checks, fire features and the training table
 #   docker compose run --rm train                      train and test the model, explain each city
+#   docker compose run --rm forecast                   forecasts for every city from the latest data
+#   docker compose up -d api                           the forecast API on http://localhost:8000/docs
 name: aqcast
 
 services:
@@ -47,6 +49,33 @@ services:
       - ./data:/data:ro               # training only reads the data
       - ./models:/models
     profiles: ["jobs"]
+
+  forecast:
+    build:
+      context: .
+      dockerfile: containers/sync.Dockerfile
+      target: train
+    image: aqcast-forecast:dev       # same build as train (cached), another command
+    pull_policy: build
+    entrypoint: ["python", "-m", "aqcast.forecast"]
+    volumes:
+      - ./data:/data
+      - ./models:/models:ro
+    profiles: ["jobs"]
+
+  api:
+    build:
+      context: .
+      dockerfile: containers/sync.Dockerfile
+      target: api
+    image: aqcast-api:dev
+    pull_policy: build
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data:ro
+      - ./models:/models:ro
+    restart: unless-stopped
 
   tests:
     build:

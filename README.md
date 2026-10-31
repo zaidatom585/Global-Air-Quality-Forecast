@@ -6,8 +6,8 @@ each city's pollution: upwind fires, coal, dust or the weather.
 
 The same container images run in Docker Compose, in Kubernetes on Docker Desktop, and in GitHub Actions.
 
-**Status:** milestone 3 of 7, the model. Data collection (1) and data checks with the training table (2) are
-done; the prediction API, dashboard and Kubernetes setup follow.
+**Status:** milestone 4 of 7, the forecast API. Data collection (1), data checks and the training table (2)
+and the model (3) are done; the dashboard and Kubernetes setup follow.
 
 ## Cities
 
@@ -36,7 +36,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 41 tests, no network needed
+docker compose run --rm tests   # 46 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -98,6 +98,31 @@ per-city scale factor learned on other test rows corrects that, and both version
 drives each city's forecast, over all forecasts and over each city's worst 10%, where smoke episodes are.
 Results go to `models/report/` (`summary.md` has the tables).
 
+## Live forecasts and the API
+
+```bash
+docker compose run --rm sync update      # latest sensor readings, fires and weather/CAMS forecasts
+docker compose run --rm forecast         # forecasts for every city from that data
+docker compose up -d api                 # http://localhost:8000/docs
+```
+
+The forecast job builds the same features as in training at each city's latest 6-hour issue time. PM2.5
+comes from the last 10 days of readings, through the same checks. Weather is stitched from reanalysis, the
+first hours of each saved forecast and the latest forecast for the hours ahead; fires from the last 15 days of
+detections, without the permanent hotspots. It saves every forecast (for scoring later) and a `latest.json`
+that the API serves.
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /health` | whether a forecast exists and how old it is |
+| `GET /cities` | the cities with their latest observed PM2.5 |
+| `GET /forecast` | the latest 24, 48 and 72-hour forecast for every city |
+| `GET /forecast/{city}` | one city in full: model and bias-corrected values, an indicative US AQI category, persistence and CAMS for comparison, the share of each driver, and the features that moved the forecast most (as % up or down) |
+| `GET /model` | how the model was trained and how it scored, overall and per city |
+
+The API only reads files, so it starts in a second, needs no model library and can run as several copies.
+Forecasts are indicative, not an official air-quality service.
+
 ## How the data is stored
 
 Parquet files under `data/`, one file per natural period, written atomically:
@@ -114,6 +139,8 @@ data/clean/pm25_hourly.parquet                                checked hourly PM2
 data/clean/quality_report.json, sensor_quality.parquet        what the checks removed, per city and sensor
 data/clean/fire_static_cells.parquet, fires_by_city.parquet   permanent hotspots; fire power around each city
 data/features/training.parquet                                the model's training table
+data/forecasts/model/issued=<YYYY-MM-DDTHH>/forecast.parquet  the model's live forecasts, kept for scoring
+data/forecasts/model/latest.json                              what the API serves
 ```
 
 Design choices:
@@ -148,6 +175,8 @@ aqcast/            Python package
   prepare.py       command line: clean, fires, features, all
   model.py         training, tests against baselines, SHAP drivers
   train.py         command line: train
+  forecast.py      live forecasts from the latest data (command line too)
+  api.py           FastAPI app serving the forecasts
   web.py           rate limiting and retries
   storage.py       Parquet writes and date helpers
   settings.py      paths, keys, city list

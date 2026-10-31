@@ -102,11 +102,19 @@ def fire_features(fires: pd.DataFrame, issue: pd.DatetimeIndex, wind_from: pd.Se
     return out.fillna(0.0)
 
 
-def city_table(city: City, pm: pd.Series, wx: pd.DataFrame, cams: pd.DataFrame, fires: pd.DataFrame) -> pd.DataFrame:
-    """All rows for one city. `pm` is the hourly city PM2.5 indexed by hour (UTC)."""
+def city_table(city: City, pm: pd.Series, wx: pd.DataFrame, cams: pd.DataFrame, fires: pd.DataFrame,
+               labeled_only: bool = True, until: pd.Timestamp | None = None) -> pd.DataFrame:
+    """All rows for one city. `pm` is the hourly city PM2.5 indexed by hour (UTC).
+
+    For training, only rows whose target is known are kept. For a live forecast (labeled_only=False), rows
+    without a target are kept too, and `until` extends the hours covered so the weather forecast for the
+    target hours can be attached."""
     if pm.dropna().empty:
         return pd.DataFrame()
-    idx = hourly_index(pm.index.min(), pm.index.max() + pd.Timedelta(hours=1))
+    end = pm.index.max() + pd.Timedelta(hours=1)
+    if until is not None:
+        end = max(end, pd.Timestamp(until).floor("h"))
+    idx = hourly_index(pm.index.min(), end)
     # OpenAQ stamps an hour by its start: the value for 06:00-07:00 is known only at 07:00. Shifting by one
     # hour puts each value at the time it becomes known, so features at t use only hours that have ended.
     p = pm.reindex(idx).shift(1)
@@ -132,7 +140,7 @@ def city_table(city: City, pm: pd.Series, wx: pd.DataFrame, cams: pd.DataFrame, 
         feats[f"cams_{name}"] = col(c, src, idx)
     feats["cams_pm25_24h"] = col(c, "pm2_5", idx).rolling(24, min_periods=12).mean()
 
-    issue = idx[(idx.hour % ISSUE_EVERY == 0)]
+    issue = idx[(idx.hour % ISSUE_EVERY == 0) & (idx <= pm.index.max() + pd.Timedelta(hours=1))]
     base = feats.reindex(issue)
     base = base[base["pm_3h"].notna()]
     if base.empty:
@@ -169,7 +177,9 @@ def city_table(city: City, pm: pd.Series, wx: pd.DataFrame, cams: pd.DataFrame, 
         t["time_weekday"] = at.dayofweek
         rows.append(t)
     out = pd.concat(rows)
-    out = out[out["y"].notna()].copy()
+    if labeled_only:
+        out = out[out["y"].notna()]
+    out = out.copy()
     out.index.name = "issue_utc"
     out = out.reset_index()
     out.insert(0, "city", city.slug)

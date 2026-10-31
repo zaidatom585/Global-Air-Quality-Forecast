@@ -1,2 +1,3 @@
 # Test dependencies (used by the "test" stage of containers/sync.Dockerfile)
 pytest>=8,<9
+httpx>=0.27,<1          # FastAPI's test client
