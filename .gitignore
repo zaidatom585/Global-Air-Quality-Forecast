@@ -13,3 +13,6 @@ __pycache__/
 # Editors
 .vscode/
 .idea/
+
+# Packaged copies of the project
+*.zip

@@ -5,6 +5,7 @@
 #   docker compose run --rm sync backfill --source all download history since Aug 2022
 #   docker compose run --rm sync update                recent data + current forecasts
 #   docker compose run --rm sync status                what is on disk
+#   docker compose run --rm prepare all                checks, fire features and the training table
 name: aqcast
 
 services:
@@ -20,6 +21,19 @@ services:
         required: false
     volumes:
       - ./data:/data
+
+  prepare:
+    image: aqcast-prepare:dev         # same build as the collector (cached), started with another command
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: containers/sync.Dockerfile
+      target: runtime
+    entrypoint: ["python", "-m", "aqcast.prepare"]
+    command: ["all"]
+    volumes:
+      - ./data:/data
+    profiles: ["jobs"]
 
   tests:
     build:

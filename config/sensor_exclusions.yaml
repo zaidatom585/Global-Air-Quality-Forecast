@@ -1,0 +1,6 @@
+# OpenAQ sensors left out of the PM2.5 series, with the reason. Indoor, test, calibration and demo units are
+# also dropped automatically by name (see aqcast/clean.py). Add a sensor here after checking it in
+# data/clean/sensor_quality.parquet or the quality report.
+exclude:
+  - {sensor_id: 15890334, city: sacramento, reason: "unnamed unit ('2-1') reporting for one month beside a reference monitor"}
+  - {sensor_id: 16079423, city: sacramento, reason: "unnamed unit ('7-3') reporting for one month beside a reference monitor"}

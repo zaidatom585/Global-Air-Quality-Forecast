@@ -6,7 +6,8 @@ each city's pollution: upwind fires, coal, dust or the weather.
 
 The same container images run in Docker Compose, in Kubernetes on Docker Desktop, and in GitHub Actions.
 
-**Status:** milestone 1 of 7, data collection. The model, prediction API, dashboard and Kubernetes setup follow.
+**Status:** milestone 2 of 7, data checks and the training table. Milestone 1 (data collection) is done; the
+model, prediction API, dashboard and Kubernetes setup follow.
 
 ## Cities
 
@@ -35,7 +36,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 19 tests, no network needed
+docker compose run --rm tests   # 33 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -45,6 +46,33 @@ docker compose run --rm sync status                  # files, rows and newest ti
 
 `backfill` takes `--source openaq|firms|weather|cams|all`, `--start`, `--end` and `--cities delhi,lahore`.
 A source whose key is missing is skipped, so the others still run.
+
+## Prepare the training data
+
+```bash
+docker compose run --rm prepare all        # or one step: clean | fires | features
+```
+
+1. **clean**: PM2.5 checks. Hour stamps are moved to whole UTC hours first (stations in India and Nepal report
+   hours starting at :30 or :15 UTC). Indoor, test and calibration units are dropped by name, and others listed with a
+   reason in [`config/sensor_exclusions.yaml`](config/sensor_exclusions.yaml). Each hourly reading is flagged
+   if it is missing, covers under 75% of the hour (unless the sensor's coverage figure is low nearly all the
+   time, which means the figure is wrong), is below -5 or above 1,500 µg/m³, repeats the same value
+   for 24 hours (a stuck sensor), or is a one-off spike far above the sensor's running median. A station's
+   value is the median of its sensor records and the city's value the median of its stations. A quality
+   report per city lists coverage and the share of readings each rule removed.
+2. **fires**: gas flares, steel works and other permanent hotspots (fire detections in the same 2 km cell in
+   at least 35% of months, spread over 9 or more calendar months) are removed, then fire power within 1,000 km of each city is summed per 6 hours
+   by distance ring (0-100, 100-300, 300-600, 600-1,000 km) and compass direction.
+3. **features**: one row per city, forecast time (every 6 hours) and horizon (24, 48, 72 h). The target is
+   the mean PM2.5 over the six hours ending at the horizon. Features: recent PM2.5, CAMS at forecast time,
+   weather now and at the target time, fire power in the last 24 and 72 hours per ring, and fire power
+   upwind (each direction weighted by how directly the wind blows from it towards the city).
+
+No feature uses data from after the forecast time, with one stated exception: the weather at the target
+time comes from reanalysis (what happened), standing in for the weather forecast the model gets in real use.
+Scores on this table are therefore a little optimistic; the saved forecast snapshots allow the honest test.
+CAMS at the target time is left out for the same reason, because its history is built from analyses.
 
 ## How the data is stored
 
@@ -58,6 +86,10 @@ data/weather/history/city=<slug>/<YYYY-MM>.parquet            hourly weather
 data/cams/history/city=<slug>/<YYYY-MM>.parquet               hourly CAMS PM2.5, dust, aerosols
 data/forecasts/{weather,cams}/issued=<YYYY-MM-DDTHH>/<slug>.parquet   forecasts as issued, every 6 hours
 data/runs/<time>_<command>.json                               what each run did
+data/clean/pm25_hourly.parquet                                checked hourly PM2.5 per city
+data/clean/quality_report.json, sensor_quality.parquet        what the checks removed, per city and sensor
+data/clean/fire_static_cells.parquet, fires_by_city.parquet   permanent hotspots; fire power around each city
+data/features/training.parquet                                the model's training table
 ```
 
 Design choices:
@@ -86,10 +118,14 @@ Design choices:
 aqcast/            Python package
   sources/         openaq.py, firms.py, openmeteo.py: one module per data source
   sync.py          command line: sensors, backfill, update, snapshot, status
+  clean.py         PM2.5 checks and the hourly city series
+  fires.py         permanent hotspots; fire power by distance and direction
+  features.py      the training table
+  prepare.py       command line: clean, fires, features, all
   web.py           rate limiting and retries
   storage.py       Parquet writes and date helpers
   settings.py      paths, keys, city list
-config/            cities and fire-search regions
+config/            cities, fire-search regions, excluded sensors
 containers/        Dockerfiles
 tests/             tests with fake API responses
 tools/             check_coverage.py, used to pick the cities

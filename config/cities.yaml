@@ -2,11 +2,11 @@
 # (tools/check_coverage.py): each has PM2.5 data for at least 84% of the past year.
 #
 # fire_region: the satellite fire-search box the city sits in (see fire_regions below).
-# driver: "the main pollution source the project tests for that city.
+# driver: the main pollution source the project tests for that city.
 
 cities:
   # South Asia: crop burning, haze, coal
-  - {name: Delhi,        slug: delhi,        country: IN, lat: 28.61, lon: 77.21,   fire_region: south_asia,     driver: crop burning upwind; winter inversions"}
+  - {name: Delhi,        slug: delhi,        country: IN, lat: 28.61, lon: 77.21,   fire_region: south_asia,     driver: "crop burning upwind; winter inversions"}
   - {name: Lahore,       slug: lahore,       country: PK, lat: 31.55, lon: 74.34,   fire_region: south_asia,     driver: "crop burning"}
   - {name: Kolkata,      slug: kolkata,      country: IN, lat: 22.57, lon: 88.36,   fire_region: south_asia,     driver: "regional haze; coal belt upwind"}
   - {name: Patna,        slug: patna,        country: IN, lat: 25.59, lon: 85.14,   fire_region: south_asia,     driver: "Indo-Gangetic haze"}

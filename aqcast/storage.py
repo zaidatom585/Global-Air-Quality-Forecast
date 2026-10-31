@@ -21,8 +21,13 @@ def write_frame(df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
-def read_frame(path: Path) -> pd.DataFrame:
-    return pd.read_parquet(path)
+def read_frame(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
+    return pd.read_parquet(path, columns=columns)
+
+
+def as_utc(values) -> pd.Series:
+    """Timestamps as tz-aware UTC with one fixed resolution, so columns from different files always join."""
+    return pd.to_datetime(values, utc=True).astype("datetime64[ns, UTC]")
 
 
 def fetched_after(path: Path, moment: datetime) -> bool:
