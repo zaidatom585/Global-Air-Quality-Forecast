@@ -164,6 +164,9 @@ def run(settings: Settings) -> dict:
         for p in sorted((d / "openaq" / "hours" / f"sensor={sid}").glob("*.parquet")):
             part = read_frame(p, columns=["sensor_id", "hour_utc", "pm25", "pct_complete"])
             if len(part):
+                # Fixed types, so an all-empty column in one month doesn't change the combined table's types.
+                part["pm25"] = pd.to_numeric(part["pm25"], errors="coerce").astype(float)
+                part["pct_complete"] = pd.to_numeric(part["pct_complete"], errors="coerce").astype(float)
                 parts.append(part)
     if not parts:
         raise RuntimeError("No OpenAQ readings found. Run:  backfill --source openaq")

@@ -1,0 +1,4 @@
+# Model dependencies (the "ml" stage of containers/sync.Dockerfile). LightGBM needs the OpenMP runtime
+# (libgomp1), which the Dockerfile installs, and scikit-learn for its LGBMRegressor interface.
+lightgbm>=4.3,<5
+scikit-learn>=1.4,<2

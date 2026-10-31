@@ -6,8 +6,8 @@ each city's pollution: upwind fires, coal, dust or the weather.
 
 The same container images run in Docker Compose, in Kubernetes on Docker Desktop, and in GitHub Actions.
 
-**Status:** milestone 2 of 7, data checks and the training table. Milestone 1 (data collection) is done; the
-model, prediction API, dashboard and Kubernetes setup follow.
+**Status:** milestone 3 of 7, the model. Data collection (1) and data checks with the training table (2) are
+done; the prediction API, dashboard and Kubernetes setup follow.
 
 ## Cities
 
@@ -36,7 +36,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 33 tests, no network needed
+docker compose run --rm tests   # 41 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -69,10 +69,34 @@ docker compose run --rm prepare all        # or one step: clean | fires | featur
    weather now and at the target time, fire power in the last 24 and 72 hours per ring, and fire power
    upwind (each direction weighted by how directly the wind blows from it towards the city).
 
+Notes on the data, from the quality report: OpenAQ has no records for the Delhi, Kolkata and Patna stations
+between November 2022 and January 2025, so those cities have about two years of data rather than four.
+
 No feature uses data from after the forecast time, with one stated exception: the weather at the target
 time comes from reanalysis (what happened), standing in for the weather forecast the model gets in real use.
 Scores on this table are therefore a little optimistic; the saved forecast snapshots allow the honest test.
 CAMS at the target time is left out for the same reason, because its history is built from analyses.
+
+## Train and test the model
+
+```bash
+docker compose run --rm train            # about 10-20 minutes; --quick for a fast check
+```
+
+One LightGBM model for all cities and horizons, trained on log(1 + PM2.5) so that cities from 5 to 120 µg/m³
+count alike. It is tested two ways, always on rows it never saw:
+
+- **held-out months**: months are split into 5 groups; each group is predicted by a model trained on the other
+  four, with 4 days left out on each side so no training row overlaps a test row's 72-hour window;
+- **recent**: the last 90 days, predicted by a model trained only on earlier data.
+
+Baselines on the same rows: **persistence** (the next days look like the last 24 hours) and the **CAMS**
+forecast where a saved forecast exists (from the start of collection, so this comparison grows over time).
+A log-scale model predicts the typical value, which sits below the average, so it under-shoots smog peaks; a
+per-city scale factor learned on other test rows corrects that, and both versions are scored. SHAP values
+(LightGBM's built-in TreeSHAP) are grouped into recent PM2.5, weather, fires, CAMS, time and place to show what
+drives each city's forecast, over all forecasts and over each city's worst 10%, where smoke episodes are.
+Results go to `models/report/` (`summary.md` has the tables).
 
 ## How the data is stored
 
@@ -122,6 +146,8 @@ aqcast/            Python package
   fires.py         permanent hotspots; fire power by distance and direction
   features.py      the training table
   prepare.py       command line: clean, fires, features, all
+  model.py         training, tests against baselines, SHAP drivers
+  train.py         command line: train
   web.py           rate limiting and retries
   storage.py       Parquet writes and date helpers
   settings.py      paths, keys, city list

@@ -6,6 +6,7 @@
 #   docker compose run --rm sync update                recent data + current forecasts
 #   docker compose run --rm sync status                what is on disk
 #   docker compose run --rm prepare all                checks, fire features and the training table
+#   docker compose run --rm train                      train and test the model, explain each city
 name: aqcast
 
 services:
@@ -33,6 +34,18 @@ services:
     command: ["all"]
     volumes:
       - ./data:/data
+    profiles: ["jobs"]
+
+  train:
+    build:
+      context: .
+      dockerfile: containers/sync.Dockerfile
+      target: train
+    image: aqcast-train:dev
+    pull_policy: build
+    volumes:
+      - ./data:/data:ro               # training only reads the data
+      - ./models:/models
     profiles: ["jobs"]
 
   tests:
