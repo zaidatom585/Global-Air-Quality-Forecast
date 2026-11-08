@@ -190,7 +190,7 @@ kubectl -n aqcast logs -f job/pipeline-now --all-containers         # follow it
 ```
 
 The project folder is assumed to be `D:\Projects\smoke-forecast`; for another location, change the two paths
-in `k8s/storage.yaml`. After changing the code, rebuild the images and run
+in `k8s/base/storage.yaml`. After changing the code, rebuild the images and run
 `kubectl -n aqcast rollout restart deployment/api`; the CronJobs pick up new images on their next run.
 `kubectl delete -k k8s` removes everything except the data.
 
@@ -274,7 +274,7 @@ aqcast/            Python package
   settings.py      paths, keys, city list
 config/            cities, fire-search regions, excluded sensors
 containers/        Dockerfiles
-k8s/               Kubernetes manifests (kubectl apply -k k8s); overlays/ghcr runs the published images
+k8s/               Kubernetes (kubectl apply -k k8s): manifests in base/; overlays/ghcr runs the published images
 .github/           CI workflow and Dependabot settings
 powerbi/           Power BI report and its PDF
 tests/             tests with fake API responses

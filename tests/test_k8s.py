@@ -5,7 +5,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-K8S = ROOT / "k8s"
+K8S = ROOT / "k8s" / "base"
 LOCAL_IMAGES = {"aqcast-sync:dev", "aqcast-train:dev", "aqcast-api:dev"}
 
 
@@ -109,3 +109,13 @@ def test_storage_points_at_the_compose_folders():
     assert pvs["aqcast-data"]["hostPath"]["path"].endswith("/smoke-forecast/data")
     assert pvs["aqcast-models"]["hostPath"]["path"].endswith("/smoke-forecast/models")
     assert all(p["persistentVolumeReclaimPolicy"] == "Retain" for p in pvs.values())
+
+
+def test_no_kustomization_includes_a_folder_that_contains_it():
+    """kustomize rejects that as a cycle (the ghcr overlay once used ../.. and failed in CI)."""
+    for kfile in (ROOT / "k8s").rglob("kustomization.yaml"):
+        here = kfile.parent.resolve()
+        for entry in yaml.safe_load(kfile.read_text(encoding="utf-8")).get("resources", []):
+            target = (here / entry).resolve()
+            if target.is_dir():
+                assert target not in here.parents, f"{kfile}: {entry} contains this kustomization"

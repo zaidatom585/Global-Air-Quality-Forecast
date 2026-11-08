@@ -1,14 +1,8 @@
-# Everything for Kubernetes on Docker Desktop:  kubectl apply -k k8s
+# Everything for Kubernetes on Docker Desktop, with locally built images:  kubectl apply -k k8s
 # The API keys are not here: they go into a Secret created from your .env (see README, "Run on Kubernetes").
+# The manifests live in base/, so that overlays/ghcr can reuse them without kustomize seeing a loop
+# (a kustomization may not include a folder that contains itself).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: aqcast
-labels:
-  - pairs: {app.kubernetes.io/part-of: aqcast}
-    includeSelectors: false
 resources:
-  - namespace.yaml
-  - storage.yaml
-  - api.yaml
-  - pipeline.yaml
-  - retrain.yaml
+  - base

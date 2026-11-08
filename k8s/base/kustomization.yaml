@@ -1,0 +1,14 @@
+# The shared setup: namespace, storage, API and CronJobs. Applied through k8s/ (local images) or k8s/overlays/ghcr.
+# The API keys are not here: they go into a Secret created from your .env (see README, "Run on Kubernetes").
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: aqcast
+labels:
+  - pairs: {app.kubernetes.io/part-of: aqcast}
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - api.yaml
+  - pipeline.yaml
+  - retrain.yaml
