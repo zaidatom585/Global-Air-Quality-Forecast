@@ -1,12 +1,20 @@
-# Weekly pull requests when the actions, Python packages or base image used here get updates.
+# Update proposals, grouped into one pull request per ecosystem per week instead of one per package.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}
   - package-ecosystem: pip
     directory: /requirements
     schedule: {interval: weekly}
+    groups:
+      python: {patterns: ["*"]}
+    ignore:
+      # pandas 3 changes defaults the code relies on (string and datetime types); move to it deliberately.
+      - dependency-name: pandas
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /containers
     schedule: {interval: weekly}

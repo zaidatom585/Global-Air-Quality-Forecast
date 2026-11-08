@@ -56,7 +56,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install kubeconform
         run: |
-          curl -sSfL -o kubeconform.tar.gz \
+          # GitHub's download servers occasionally time out (HTTP 504): retry before giving up.
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 -o kubeconform.tar.gz \
             "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
           tar -xzf kubeconform.tar.gz kubeconform
           sudo mv kubeconform /usr/local/bin/
