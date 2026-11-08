@@ -1,6 +1,6 @@
 # Global Air Quality Forecast
 
-[![ci](https://github.com/zaidatom585/Global-Air-Quality-Forecast/actions/workflows/ci.yml/badge.svg)](https://github.com/zaidatom585/Global-Air-Quality-Forecast/actions/workflows/ci.yml)
+[![ci](https://github.com/zaidatom585/Global-Air-Quality-Forecast/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/zaidatom585/Global-Air-Quality-Forecast/actions/workflows/ci.yml?query=branch%3Amain)
 
 Forecasts PM2.5 24–72 hours ahead for 36 cities on six continents, using satellite fire detections, ground sensors
 and weather, and measures how much it improves on the official CAMS forecast. It also asks which driver dominates
