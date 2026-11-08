@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Build the test image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: containers/sync.Dockerfile
@@ -97,7 +97,7 @@ jobs:
             type=semver,pattern={{version}}
 
       - name: Build ${{ matrix.name }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: containers/sync.Dockerfile
@@ -138,7 +138,7 @@ jobs:
 
       - name: Publish ${{ matrix.name }}
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: containers/sync.Dockerfile
