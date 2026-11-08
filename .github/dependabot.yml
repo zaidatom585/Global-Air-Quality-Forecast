@@ -1,0 +1,12 @@
+# Weekly pull requests when the actions, Python packages or base image used here get updates.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule: {interval: weekly}
+  - package-ecosystem: docker
+    directory: /containers
+    schedule: {interval: weekly}

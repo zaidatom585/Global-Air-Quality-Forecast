@@ -1,0 +1,26 @@
+# The same setup, running the images CI publishes to GitHub Container Registry instead of local builds:
+#   kubectl apply -k k8s/overlays/ghcr
+# The images must be public (GitHub → your profile → Packages → each package → Package settings →
+# Change visibility), or the cluster needs an image pull secret.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../..
+images:
+  - {name: aqcast-sync, newName: ghcr.io/zaidatom585/global-air-quality-forecast/sync, newTag: latest}
+  - {name: aqcast-train, newName: ghcr.io/zaidatom585/global-air-quality-forecast/train, newTag: latest}
+  - {name: aqcast-api, newName: ghcr.io/zaidatom585/global-air-quality-forecast/api, newTag: latest}
+patches:
+  # Local images are never pulled; registry images are checked for a newer "latest" on every start.
+  - target: {kind: Deployment, name: api}
+    patch: |-
+      - {op: replace, path: /spec/template/spec/containers/0/imagePullPolicy, value: Always}
+  - target: {kind: CronJob, name: pipeline}
+    patch: |-
+      - {op: replace, path: /spec/jobTemplate/spec/template/spec/initContainers/0/imagePullPolicy, value: Always}
+      - {op: replace, path: /spec/jobTemplate/spec/template/spec/initContainers/1/imagePullPolicy, value: Always}
+      - {op: replace, path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy, value: Always}
+  - target: {kind: CronJob, name: retrain}
+    patch: |-
+      - {op: replace, path: /spec/jobTemplate/spec/template/spec/initContainers/0/imagePullPolicy, value: Always}
+      - {op: replace, path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy, value: Always}

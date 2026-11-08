@@ -1,13 +1,23 @@
 # Global Air Quality Forecast
 
+[![ci](https://github.com/zaidatom585/Global-Air-Quality-Forecast/actions/workflows/ci.yml/badge.svg)](https://github.com/zaidatom585/Global-Air-Quality-Forecast/actions/workflows/ci.yml)
+
 Forecasts PM2.5 24–72 hours ahead for 36 cities on six continents, using satellite fire detections, ground sensors
 and weather, and measures how much it improves on the official CAMS forecast. It also asks which driver dominates
 each city's pollution: upwind fires, coal, dust or the weather.
 
 The same container images run in Docker Compose, in Kubernetes on Docker Desktop, and in GitHub Actions.
 
-**Status:** milestone 6 of 7, Kubernetes. Data collection (1), data checks and the training table (2), the
-model (3), the forecast API (4) and the Power BI report (5) are done; CI follows.
+**Results at a glance**
+
+- Data: 2.4 million hourly PM2.5 readings from 187 sensors, 94 million satellite fire detections, and weather
+  and CAMS history for 36 cities since August 2022.
+- Model: errors **27% smaller than persistence** on held-out months (17% on the latest 90 days). In
+  fire-prone cities, wildfire smoke explains up to 17% of the worst forecasts (Edmonton), against 8% overall.
+- Live: the first 266 real forecasts had errors **29% smaller than persistence and 57% smaller than CAMS**
+  (31 Oct – 8 Nov 2026; early figures that grow daily).
+- Running: Kubernetes refreshes the data and forecasts every 6 hours; a FastAPI service serves them; a Power BI
+  report shows them; CI tests, scans and publishes every image.
 
 ## Cities
 
@@ -36,7 +46,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 55 tests, no network needed
+docker compose run --rm tests   # 61 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -184,6 +194,27 @@ in `k8s/storage.yaml`. After changing the code, rebuild the images and run
 `kubectl -n aqcast rollout restart deployment/api`; the CronJobs pick up new images on their next run.
 `kubectl delete -k k8s` removes everything except the data.
 
+To run the images CI publishes instead of local builds: `kubectl apply -k k8s/overlays/ghcr` (the packages must
+be public, or the cluster needs an image pull secret).
+
+## CI and published images
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on GitHub's machines:
+
+| Job | What it does |
+| --- | --- |
+| `tests` | builds the test image and runs the whole suite |
+| `manifests` | renders the Kubernetes manifests (local and registry versions) and checks them against the API schemas with kubeconform |
+| `images` | builds the `sync`, `train` and `api` images, prints a Trivy report of HIGH and CRITICAL vulnerabilities, fails on any fixable CRITICAL one, saves a CycloneDX software bill of materials, and on `main` and version tags publishes the images to `ghcr.io/zaidatom585/global-air-quality-forecast/<image>` |
+
+It also runs every Monday to rescan for vulnerabilities found since the last build, and Dependabot proposes
+updates for the actions, Python packages and base image. Images are published only after the tests and
+manifest checks pass, never from pull requests, and only the publishing job may write packages.
+
+Only GitHub's and Docker's own actions are used. Trivy runs from its container image pinned to 0.69.3, the last
+release before the March 2026 Trivy supply-chain compromise (CVE-2026-33634), in which most
+`aquasecurity/trivy-action` tags were repointed to credential-stealing code.
+
 ## How the data is stored
 
 Parquet files under `data/`, one file per natural period, written atomically:
@@ -243,7 +274,8 @@ aqcast/            Python package
   settings.py      paths, keys, city list
 config/            cities, fire-search regions, excluded sensors
 containers/        Dockerfiles
-k8s/               Kubernetes manifests (kubectl apply -k k8s)
+k8s/               Kubernetes manifests (kubectl apply -k k8s); overlays/ghcr runs the published images
+.github/           CI workflow and Dependabot settings
 powerbi/           Power BI report and its PDF
 tests/             tests with fake API responses
 tools/             check_coverage.py, used to pick the cities

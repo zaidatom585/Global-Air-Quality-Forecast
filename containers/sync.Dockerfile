@@ -10,6 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 WORKDIR /app
+# Security updates for the operating system packages in the base image
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY requirements/sync.txt requirements/sync.txt
 RUN pip install -r requirements/sync.txt
 COPY config/ config/
@@ -26,6 +28,7 @@ COPY requirements/dev.txt requirements/api.txt requirements/
 RUN pip install -r requirements/dev.txt -r requirements/api.txt
 COPY pytest.ini compose.yaml ./
 COPY k8s/ k8s/
+COPY .github/ .github/
 COPY tests/ tests/
 CMD ["python", "-m", "pytest", "-q"]
 
