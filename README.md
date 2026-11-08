@@ -6,8 +6,8 @@ each city's pollution: upwind fires, coal, dust or the weather.
 
 The same container images run in Docker Compose, in Kubernetes on Docker Desktop, and in GitHub Actions.
 
-**Status:** milestone 4 of 7, the forecast API. Data collection (1), data checks and the training table (2)
-and the model (3) are done; the dashboard and Kubernetes setup follow.
+**Status:** milestone 5 of 7, the dashboard. Data collection (1), data checks and the training table (2), the
+model (3) and the forecast API (4) are done; the Kubernetes setup and CI follow.
 
 ## Cities
 
@@ -36,7 +36,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 46 tests, no network needed
+docker compose run --rm tests   # 47 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -98,13 +98,42 @@ per-city scale factor learned on other test rows corrects that, and both version
 drives each city's forecast, over all forecasts and over each city's worst 10%, where smoke episodes are.
 Results go to `models/report/` (`summary.md` has the tables).
 
+## Power BI report
+
+A four-page Power BI report built on the forecast files and the API
+([`powerbi/Global_Air_Quality_Forecast.pbix`](powerbi/Global_Air_Quality_Forecast.pbix),
+[PDF](powerbi/Global_Air_Quality_Forecast.pdf)):
+
+| Page | Shows |
+| --- | --- |
+| Overview | Every city's forecast for the next 3 days, on a map and in a table coloured by US EPA category |
+| City detail | The past week of measured PM2.5 running into the forecast, next to CAMS and persistence, with the drivers behind it |
+| Model performance | Skill against persistence by city and horizon, and how much fires drive each city's worst days |
+| Forecast vs actual | Live forecasts scored once their target time has passed, against CAMS and persistence |
+
+![Overview](images/dashboard_overview.png)
+![City detail](images/dashboard_city_detail.png)
+![Model performance](images/dashboard_model_performance.png)
+![Forecast vs actual](images/dashboard_forecast_vs_actual.png)
+
+Data comes from `data/forecasts/model` (every forecast), `data/clean/pm25_hourly.parquet` (measured
+PM2.5), `models/report` (test scores and drivers) and the API's `/cities` endpoint. To refresh, run
+`sync update`, `forecast` and `prepare clean`, then refresh the report.
+
 ## Live forecasts and the API
 
 ```bash
 docker compose run --rm sync update      # latest sensor readings, fires and weather/CAMS forecasts
 docker compose run --rm forecast         # forecasts for every city from that data
-docker compose up -d api                 # http://localhost:8000/docs
+docker compose up -d api                 # dashboard: http://localhost:8000/dashboard  API docs: /docs
 ```
+
+The **dashboard** is one page served by the API: a map of the cities coloured by tomorrow's forecast, a
+list sortable by tomorrow's level or by the biggest rise, and for the chosen city the last 7 days of measured
+PM2.5 with this model's 24, 48 and 72-hour forecast next to CAMS and persistence, the share of each driver
+group and the features that moved the forecast most. It also shows how the model scored per city on months
+it never saw. Plain HTML and JavaScript with hand-drawn charts; the map uses Leaflet with CARTO/OpenStreetMap
+tiles and falls back to a plain dot map offline.
 
 The forecast job builds the same features as in training at each city's latest 6-hour issue time. PM2.5
 comes from the last 10 days of readings, through the same checks. Weather is stitched from reanalysis, the
@@ -121,6 +150,9 @@ that the API serves.
 | `GET /model` | how the model was trained and how it scored, overall and per city |
 
 The API only reads files, so it starts in a second, needs no model library and can run as several copies.
+Feature effects (`top_features`, as % up or down) are SHAP values measured from the model's average forecast
+across all cities, so for a polluted city its own recent PM2.5 and its location show up as large upward
+effects.
 Forecasts are indicative, not an official air-quality service.
 
 ## How the data is stored
@@ -176,7 +208,8 @@ aqcast/            Python package
   model.py         training, tests against baselines, SHAP drivers
   train.py         command line: train
   forecast.py      live forecasts from the latest data (command line too)
-  api.py           FastAPI app serving the forecasts
+  api.py           FastAPI app serving the forecasts and the dashboard
+  static/          dashboard.html
   web.py           rate limiting and retries
   storage.py       Parquet writes and date helpers
   settings.py      paths, keys, city list
