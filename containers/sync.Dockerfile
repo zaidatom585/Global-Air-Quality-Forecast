@@ -24,7 +24,8 @@ RUN pip install -r requirements/model.txt
 FROM ml AS test
 COPY requirements/dev.txt requirements/api.txt requirements/
 RUN pip install -r requirements/dev.txt -r requirements/api.txt
-COPY pytest.ini pytest.ini
+COPY pytest.ini compose.yaml ./
+COPY k8s/ k8s/
 COPY tests/ tests/
 CMD ["python", "-m", "pytest", "-q"]
 

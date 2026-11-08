@@ -6,8 +6,8 @@ each city's pollution: upwind fires, coal, dust or the weather.
 
 The same container images run in Docker Compose, in Kubernetes on Docker Desktop, and in GitHub Actions.
 
-**Status:** milestone 5 of 7, the dashboard. Data collection (1), data checks and the training table (2), the
-model (3) and the forecast API (4) are done; the Kubernetes setup and CI follow.
+**Status:** milestone 6 of 7, Kubernetes. Data collection (1), data checks and the training table (2), the
+model (3), the forecast API (4) and the Power BI report (5) are done; CI follows.
 
 ## Cities
 
@@ -36,7 +36,7 @@ Needs Docker Desktop.
 ```bash
 cp .env.example .env            # then put your own keys in .env (never commit it)
 docker compose build
-docker compose run --rm tests   # 47 tests, no network needed
+docker compose run --rm tests   # 55 tests, no network needed
 
 docker compose run --rm sync sensors                 # choose 3 stations per city, with all their sensor records
 docker compose run --rm sync backfill --source all   # history since Aug 2022; safe to stop and rerun
@@ -118,22 +118,18 @@ A four-page Power BI report built on the forecast files and the API
 
 Data comes from `data/forecasts/model` (every forecast), `data/clean/pm25_hourly.parquet` (measured
 PM2.5), `models/report` (test scores and drivers) and the API's `/cities` endpoint. To refresh, run
-`sync update`, `forecast` and `prepare clean`, then refresh the report.
+`sync update`, `forecast` and `prepare clean` (or let the Kubernetes pipeline do it), then refresh the report.
+
+First live results (266 forecasts, 31 Oct – 8 Nov 2026): errors 29% smaller than persistence and 57% smaller
+than CAMS. Early figures, updated as forecasts accumulate.
 
 ## Live forecasts and the API
 
 ```bash
 docker compose run --rm sync update      # latest sensor readings, fires and weather/CAMS forecasts
 docker compose run --rm forecast         # forecasts for every city from that data
-docker compose up -d api                 # dashboard: http://localhost:8000/dashboard  API docs: /docs
+docker compose up -d api                 # http://localhost:8000/docs
 ```
-
-The **dashboard** is one page served by the API: a map of the cities coloured by tomorrow's forecast, a
-list sortable by tomorrow's level or by the biggest rise, and for the chosen city the last 7 days of measured
-PM2.5 with this model's 24, 48 and 72-hour forecast next to CAMS and persistence, the share of each driver
-group and the features that moved the forecast most. It also shows how the model scored per city on months
-it never saw. Plain HTML and JavaScript with hand-drawn charts; the map uses Leaflet with CARTO/OpenStreetMap
-tiles and falls back to a plain dot map offline.
 
 The forecast job builds the same features as in training at each city's latest 6-hour issue time. PM2.5
 comes from the last 10 days of readings, through the same checks. Weather is stitched from reanalysis, the
@@ -154,6 +150,39 @@ Feature effects (`top_features`, as % up or down) are SHAP values measured from 
 across all cities, so for a polluted city its own recent PM2.5 and its location show up as large upward
 effects.
 Forecasts are indicative, not an official air-quality service.
+
+## Run on Kubernetes
+
+The same images run on the Kubernetes cluster built into Docker Desktop, which then keeps everything up to date
+on its own: a CronJob refreshes the data and the forecasts every 6 hours, and the API runs as a two-copy
+Deployment. The cluster uses the same `data/` and `models/` folders as Compose, so nothing is downloaded twice.
+
+| Object | What it does |
+| --- | --- |
+| `Deployment/api` + `Service/api` | two copies of the API behind one address, http://localhost:8080; health checks restart a copy that stops answering, and updates roll out one copy at a time |
+| `CronJob/pipeline` | at 00:20, 06:20, 12:20 and 18:20 UTC: `sync update`, `prepare clean`, then `forecast`. A failing data source is logged and the run carries on; only a failed forecast fails the job. Never two runs at once; a run missed while the PC slept starts within the hour |
+| `CronJob/retrain` | rebuilds the training table and retrains; suspended, started by hand |
+| `PersistentVolume`s + claims | the project's `data/` and `models/` folders; never deleted with the cluster objects |
+| `Secret/aqcast-keys` | the OpenAQ and FIRMS keys, created from `.env`; not in the repository |
+
+Every container runs as a non-root user with a read-only root file system, no Linux capabilities and no
+access to the Kubernetes API, within CPU and memory limits; the API mounts the data read-only.
+
+Setup (Docker Desktop: Settings → Kubernetes → Enable, with the kubeadm cluster; 6 GB of memory or more):
+
+```bash
+docker compose build sync train api                         # the images the cluster runs
+kubectl apply -k k8s                                        # namespace, storage, API, CronJobs
+kubectl -n aqcast create secret generic aqcast-keys --from-env-file=.env
+kubectl -n aqcast get pods                                  # api-… pods Running and Ready
+kubectl -n aqcast create job --from=cronjob/pipeline pipeline-now   # run the pipeline once, now
+kubectl -n aqcast logs -f job/pipeline-now --all-containers         # follow it
+```
+
+The project folder is assumed to be `D:\Projects\smoke-forecast`; for another location, change the two paths
+in `k8s/storage.yaml`. After changing the code, rebuild the images and run
+`kubectl -n aqcast rollout restart deployment/api`; the CronJobs pick up new images on their next run.
+`kubectl delete -k k8s` removes everything except the data.
 
 ## How the data is stored
 
@@ -208,13 +237,14 @@ aqcast/            Python package
   model.py         training, tests against baselines, SHAP drivers
   train.py         command line: train
   forecast.py      live forecasts from the latest data (command line too)
-  api.py           FastAPI app serving the forecasts and the dashboard
-  static/          dashboard.html
+  api.py           FastAPI app serving the forecasts
   web.py           rate limiting and retries
   storage.py       Parquet writes and date helpers
   settings.py      paths, keys, city list
 config/            cities, fire-search regions, excluded sensors
 containers/        Dockerfiles
+k8s/               Kubernetes manifests (kubectl apply -k k8s)
+powerbi/           Power BI report and its PDF
 tests/             tests with fake API responses
 tools/             check_coverage.py, used to pick the cities
 ```

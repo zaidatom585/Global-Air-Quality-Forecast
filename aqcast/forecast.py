@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import warnings
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -238,6 +239,9 @@ def run(settings: Settings, now: pd.Timestamp | None = None, booster=None, card=
 
 
 def main(argv: list[str] | None = None) -> int:
+    # NumPy 2 warns about a timedelta conversion that pandas 2 makes internally; harmless and noisy, because
+    # warnings raised while running a module as a script are always shown.
+    warnings.filterwarnings("ignore", message="The 'generic' unit for NumPy timedelta", category=DeprecationWarning)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
     try:
         result = run(cfg.load())

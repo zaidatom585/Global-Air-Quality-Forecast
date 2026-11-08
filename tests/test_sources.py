@@ -54,8 +54,9 @@ def test_search_falls_back_to_a_box_when_radius_search_fails():
     assert "bbox" in f.calls[-1][1]
 
 
-def test_one_failing_city_does_not_stop_the_others(tmp_path):
+def test_one_failing_city_does_not_stop_the_others(tmp_path, monkeypatch):
     from aqcast.settings import Settings
+    monkeypatch.setattr(openaq, "utc_now", lambda: NOW)    # "active in the last 7 days" is judged at NOW, not today
     good = location(1, "Good monitor", [11], True, 900, 0)
 
     def answer(url, p):

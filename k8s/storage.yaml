@@ -1,0 +1,52 @@
+# The cluster uses the same data/ and models/ folders as Docker Compose, so nothing is downloaded twice.
+# Docker Desktop's Kubernetes (kubeadm mode) sees Windows drives under /run/desktop/mnt/host/<drive letter>.
+# If the project lives somewhere other than D:\Projects\smoke-forecast, change both paths below.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: aqcast-data
+  labels: {app.kubernetes.io/part-of: aqcast, volume: data}
+spec:
+  capacity: {storage: 20Gi}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain          # deleting the cluster objects never deletes the data
+  storageClassName: aqcast-local
+  hostPath:
+    path: /run/desktop/mnt/host/d/Projects/smoke-forecast/data
+    type: Directory                              # fail clearly instead of creating an empty folder
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: aqcast-models
+  labels: {app.kubernetes.io/part-of: aqcast, volume: models}
+spec:
+  capacity: {storage: 2Gi}
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: aqcast-local
+  hostPath:
+    path: /run/desktop/mnt/host/d/Projects/smoke-forecast/models
+    type: Directory
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: aqcast-local
+  volumeName: aqcast-data
+  resources:
+    requests: {storage: 20Gi}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: aqcast-local
+  volumeName: aqcast-models
+  resources:
+    requests: {storage: 2Gi}

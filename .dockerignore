@@ -8,3 +8,5 @@ models
 .pytest_cache
 .vscode
 .idea
+powerbi
+images
