@@ -3,7 +3,7 @@
 #   train:             python -m aqcast.train (model training and testing) and python -m aqcast.forecast
 #   api:               the forecast API (uvicorn aqcast.api:app) on port 8000
 #   test:              the test suite, run with `docker compose run --rm tests`
-FROM python:3.12-slim AS base
+FROM python:3.15-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
